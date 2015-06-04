@@ -71,9 +71,9 @@ def get_parse_data(app_id, rest_api_key, api_endpoint, master_key=None, limit=10
 parser = argparse.ArgumentParser()
 parser.add_argument('-f', '--archive-file', dest='archive_file_path', required=True, help='output archive file path (tar.bz2)')
 parser.add_argument('-o', '--export-objects', dest='parse_export_list', required=True, help='comma-separated list of parse objects to export')
-parser.add_argument('--parse-app-id', dest='parse_app_id', help='parse app id')
-parser.add_argument('--parse-api-key', dest='parse_api_key', help='parse api key')
-parser.add_argument('--parse-master-key', dest='parse_master_key', help='parse master key')
+parser.add_argument('--parse-app-id', dest='parse_app_id', help='parse app id (or export PARSE_APPLICATION_ID)')
+parser.add_argument('--parse-api-key', dest='parse_api_key', help='parse api key (or export PARSE_REST_API_KEY)')
+parser.add_argument('--parse-master-key', dest='parse_master_key', help='parse master key (or export PARSE_MASTER_KEY)')
 args = parser.parse_args()
 
 print '---- beginning parse object dump: %s ----' % datetime.strftime(datetime.now(pytz.utc), '%Y-%m-%d %H:%M:%S %z')
