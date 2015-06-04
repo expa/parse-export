@@ -2,7 +2,7 @@
 
 Simple python script to export [Parse](http://parse.com/) data
 
-## Installing
+## Requirements
 
     pip -r requirements.txt
 
@@ -27,11 +27,9 @@ optional arguments:
                         parse master key
 ```
 
-## Contribution
+## Contributing
 
-Feel free to fork and create a Pull Request.
-
-While we may not merge your PR as is, they serve to start conversations and improve the general experience for all users.
+Feel free to fork and create a Pull Request. (Please add your name to AUTHORS)
 
 ## License
 
