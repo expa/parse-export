@@ -10,6 +10,7 @@ import shutil
 import sys
 import tarfile
 import tempfile
+import time
 import urllib
 
 from datetime import datetime
@@ -76,56 +77,67 @@ parser.add_argument('--parse-api-key', dest='parse_api_key', help='parse api key
 parser.add_argument('--parse-master-key', dest='parse_master_key', help='parse master key (or export PARSE_MASTER_KEY)')
 args = parser.parse_args()
 
-print '---- beginning parse object dump: %s ----' % datetime.strftime(datetime.now(pytz.utc), '%Y-%m-%d %H:%M:%S %z')
 
-PARSE_APPLICATION_ID = get_env_setting('PARSE_APPLICATION_ID') or args.parse_app_id
-PARSE_REST_API_KEY = get_env_setting('PARSE_REST_API_KEY') or args.parse_api_key
-PARSE_MASTER_KEY = get_env_setting('PARSE_MASTER_KEY') or args.parse_master_key
-INTERNAL_PARSE_CLASSES = {'User': 'users', 'Role': 'roles', 'File': 'files', 'Events': 'events', 'Installation': 'installations'}
+def main():
+    print '---- beginning parse object dump: %s ----' % datetime.strftime(datetime.now(pytz.utc), '%Y-%m-%d %H:%M:%S %z')
 
-archive_file_path = args.archive_file_path
-temp_directory = tempfile.mkdtemp(prefix='/tmp/parse-export-')
-parse_export_list = args.parse_export_list.split(",")
+    PARSE_APPLICATION_ID = get_env_setting('PARSE_APPLICATION_ID') or args.parse_app_id
+    PARSE_REST_API_KEY = get_env_setting('PARSE_REST_API_KEY') or args.parse_api_key
+    PARSE_MASTER_KEY = get_env_setting('PARSE_MASTER_KEY') or args.parse_master_key
+    INTERNAL_PARSE_CLASSES = {'User': 'users', 'Role': 'roles', 'File': 'files', 'Events': 'events', 'Installation': 'installations'}
 
-for classname in parse_export_list:
-    results = {'results': []}
-    object_count = 0
-    startdate = '2000-01-01T00:00:00.000Z'
+    archive_file_path = args.archive_file_path
+    temp_directory = tempfile.mkdtemp(prefix='/tmp/parse-export-')
+    parse_export_list = args.parse_export_list.split(",")
 
-    if classname not in INTERNAL_PARSE_CLASSES.keys():
-        endpoint = '%s/%s' % ('classes', classname)
-    else:
-        endpoint = INTERNAL_PARSE_CLASSES[classname]
+    for classname in parse_export_list:
+        results = {'results': []}
+        object_count = 0
+        startdate = '2000-01-01T00:00:00.000Z'
 
-    sys.stdout.write('retrieving %s objects... ' % classname)
-    sys.stdout.flush()
-
-    while True:
-        parse_filter = json.dumps({'createdAt': {'$gte': {'__type': 'Date', 'iso': startdate}}})
-        parse_response = get_parse_data(PARSE_APPLICATION_ID, PARSE_REST_API_KEY, endpoint, master_key=PARSE_MASTER_KEY, order='createdAt', filter_json=parse_filter)
-
-        if 'results' in parse_response.keys() and len(parse_response['results']) > 1:
-            # print '%s: %d, %s' % (classname, len(parse_response['results']), parse_response['results'][-1]['createdAt'])
-            startdate = parse_response['results'][-1]['createdAt']
-            object_count += len(parse_response['results'])
-            results['results'].extend(parse_response['results'])
+        if classname not in INTERNAL_PARSE_CLASSES.keys():
+            endpoint = '%s/%s' % ('classes', classname)
         else:
-            print ' retrieved: %d' % object_count
-            break
+            endpoint = INTERNAL_PARSE_CLASSES[classname]
 
-    with open(os.path.join(temp_directory, '%s.json' % classname), 'w') as json_file:
-        json_file.write(json.dumps(results, indent=4, separators=(',', ': ')))
+        sys.stdout.write('retrieving %s objects... ' % classname)
+        sys.stdout.flush()
 
-print 'building archive...'
-with tarfile.open(name=archive_file_path, mode='w:bz2') as tar:
-    with change_dir(temp_directory):
-        for f in os.listdir('.'):
-            tar.add(f)
+        while True:
+            get_parse_data_startime = time.clock()
+            parse_filter = json.dumps({'createdAt': {'$gte': {'__type': 'Date', 'iso': startdate}}})
+            parse_response = get_parse_data(PARSE_APPLICATION_ID, PARSE_REST_API_KEY, endpoint, master_key=PARSE_MASTER_KEY, order='createdAt', filter_json=parse_filter)
 
-print 'cleaning up: %s' % (temp_directory)
-try:
-    shutil.rmtree(temp_directory)
-except OSError:
-    pass
+            if 'results' in parse_response.keys() and len(parse_response['results']) > 1:
+                # print '%s: %d, %s' % (classname, len(parse_response['results']), parse_response['results'][-1]['createdAt'])
+                startdate = parse_response['results'][-1]['createdAt']
+                object_count += len(parse_response['results'])
+                results['results'].extend(parse_response['results'])
+            else:
+                parse_roundtrip_seconds = time.clock() - get_parse_data_startime
+                print ' retrieved: %.4f (in %.4f seconds)' % (object_count, parse_roundtrip_seconds)
+                break
 
-print '---- completed parse object dump: %s ----' % datetime.strftime(datetime.now(pytz.utc), '%Y-%m-%d %H:%M:%S %z')
+        with open(os.path.join(temp_directory, '%s.json' % classname), 'w') as json_file:
+            json_file.write(json.dumps(results, indent=4, separators=(',', ': ')))
+
+    print 'building archive...'
+    with tarfile.open(name=archive_file_path, mode='w:bz2') as tar:
+        with change_dir(temp_directory):
+            for f in os.listdir('.'):
+                tar.add(f)
+
+    print 'cleaning up: %s' % (temp_directory)
+    try:
+        shutil.rmtree(temp_directory)
+    except OSError:
+        pass
+
+    print '---- completed parse object dump: %s ----' % datetime.strftime(datetime.now(pytz.utc), '%Y-%m-%d %H:%M:%S %z')
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except Exception, e:
+        raise e
