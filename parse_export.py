@@ -11,9 +11,12 @@ import sys
 import tarfile
 import tempfile
 import time
+import traceback
 import urllib
 
 from datetime import datetime
+
+TEMP_DIRECTORY = tempfile.mkdtemp(prefix='/tmp/parse-export-')
 
 
 def get_env_setting(setting):
@@ -36,9 +39,12 @@ def change_dir(tmp_location):
         os.chdir(cd)
 
 
-def get_parse_data(app_id, rest_api_key, api_endpoint, master_key=None, limit=1000, order=None, skip=None, filter_json=None, api_version=1):
-    connection = httplib.HTTPSConnection('api.parse.com', 443)
-    connection.connect()
+def get_parse_data(connection, app_id, rest_api_key, api_endpoint, master_key=None, limit=1000, order=None, skip=None, filter_json=None, api_version=1):
+    try:
+        connection.connect()
+    except Exception, e:
+        print(traceback.format_exc())
+        raise ParseExportException(e)
 
     header_dict = {'X-Parse-Application-Id': app_id,
                    'X-Parse-REST-API-Key': rest_api_key
@@ -64,6 +70,7 @@ def get_parse_data(app_id, rest_api_key, api_endpoint, master_key=None, limit=10
         response = json.loads(connection.getresponse().read())
     except Exception, e:
         response = None
+        print(traceback.format_exc())
         raise e
 
     return response
@@ -78,7 +85,25 @@ parser.add_argument('--parse-master-key', dest='parse_master_key', help='parse m
 args = parser.parse_args()
 
 
-def main():
+def cleanup(temp_directory=TEMP_DIRECTORY):
+    print 'cleaning up: %s' % (temp_directory)
+    try:
+        shutil.rmtree(temp_directory)
+    except OSError:
+        pass
+    except Exception, e:
+        print(traceback.format_exc())
+        raise e
+
+
+class ParseExportException(Exception):
+    def __init__(self, message):
+        super(ParseExportException, self).__init__(message)
+
+        cleanup()
+
+
+def main(temp_directory=TEMP_DIRECTORY, archive_file_path=args.archive_file_path):
     print '---- beginning parse object dump: %s ----' % datetime.strftime(datetime.now(pytz.utc), '%Y-%m-%d %H:%M:%S %z')
 
     PARSE_APPLICATION_ID = get_env_setting('PARSE_APPLICATION_ID') or args.parse_app_id
@@ -86,11 +111,14 @@ def main():
     PARSE_MASTER_KEY = get_env_setting('PARSE_MASTER_KEY') or args.parse_master_key
     INTERNAL_PARSE_CLASSES = {'User': 'users', 'Role': 'roles', 'File': 'files', 'Events': 'events', 'Installation': 'installations'}
 
-    archive_file_path = args.archive_file_path
-    temp_directory = tempfile.mkdtemp(prefix='/tmp/parse-export-')
     parse_export_list = args.parse_export_list.split(",")
 
     for classname in parse_export_list:
+        connection = httplib.HTTPSConnection('api.parse.com', 443)
+
+        get_parse_data_startime = time.time()
+        parse_request_count = 0
+
         results = {'results': []}
         object_count = 0
         startdate = '2000-01-01T00:00:00.000Z'
@@ -100,13 +128,17 @@ def main():
         else:
             endpoint = INTERNAL_PARSE_CLASSES[classname]
 
-        sys.stdout.write('retrieving %s objects... ' % classname)
+        sys.stdout.write('retrieving %s objects... \n' % classname)
         sys.stdout.flush()
 
         while True:
-            get_parse_data_startime = time.clock()
             parse_filter = json.dumps({'createdAt': {'$gte': {'__type': 'Date', 'iso': startdate}}})
-            parse_response = get_parse_data(PARSE_APPLICATION_ID, PARSE_REST_API_KEY, endpoint, master_key=PARSE_MASTER_KEY, order='createdAt', filter_json=parse_filter)
+            parse_response = get_parse_data(connection, PARSE_APPLICATION_ID, PARSE_REST_API_KEY, endpoint, master_key=PARSE_MASTER_KEY, order='createdAt', filter_json=parse_filter)
+            parse_request_count += 1
+            intermediate_get_parse_data_time = time.time() - get_parse_data_startime
+
+            sys.stdout.write('  retrieved %d objects with %d reqs for %s in %.4f seconds \r' % (object_count, parse_request_count, classname, intermediate_get_parse_data_time))
+            sys.stdout.flush()
 
             if 'results' in parse_response.keys() and len(parse_response['results']) > 1:
                 # print '%s: %d, %s' % (classname, len(parse_response['results']), parse_response['results'][-1]['createdAt'])
@@ -114,30 +146,36 @@ def main():
                 object_count += len(parse_response['results'])
                 results['results'].extend(parse_response['results'])
             else:
-                parse_roundtrip_seconds = time.clock() - get_parse_data_startime
-                print ' retrieved: %.4f (in %.4f seconds)' % (object_count, parse_roundtrip_seconds)
                 break
 
         with open(os.path.join(temp_directory, '%s.json' % classname), 'w') as json_file:
             json_file.write(json.dumps(results, indent=4, separators=(',', ': ')))
 
-    print 'building archive...'
+        parse_roundtrip_seconds = time.time() - get_parse_data_startime
+
+        sys.stdout.write('  retrieved %d objects with %d reqs for %s in %.4f seconds \n' % (object_count, parse_request_count, classname, parse_roundtrip_seconds))
+        sys.stdout.flush()
+
+    sys.stdout.write('building archive... ')
+    sys.stdout.flush()
+
+    build_archive_starttime = time.time()
+
     with tarfile.open(name=archive_file_path, mode='w:bz2') as tar:
         with change_dir(temp_directory):
             for f in os.listdir('.'):
                 tar.add(f)
+    sys.stdout.write(' done. (in %.4f seconds)\n' % (time.time() - build_archive_starttime))
+    sys.stdout.flush()
 
-    print 'cleaning up: %s' % (temp_directory)
-    try:
-        shutil.rmtree(temp_directory)
-    except OSError:
-        pass
+    cleanup(temp_directory)
 
-    print '---- completed parse object dump: %s ----' % datetime.strftime(datetime.now(pytz.utc), '%Y-%m-%d %H:%M:%S %z')
-
+    sys.stdout.write('---- completed parse object dump: %s ----\n' % datetime.strftime(datetime.now(pytz.utc), '%Y-%m-%d %H:%M:%S %z'))
+    sys.stdout.flush()
 
 if __name__ == '__main__':
     try:
         main()
     except Exception, e:
-        raise e
+        print(traceback.format_exc())
+        raise ParseExportException(e)
