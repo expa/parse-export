@@ -5,7 +5,6 @@ import contextlib
 import httplib
 import json
 import os
-import pytz
 import shutil
 import sys
 import tarfile
@@ -15,6 +14,8 @@ import traceback
 import urllib
 
 from datetime import datetime
+
+import pytz
 
 TEMP_DIRECTORY = tempfile.mkdtemp(prefix='/tmp/parse-export-')
 
@@ -43,7 +44,7 @@ def get_parse_data(connection, app_id, rest_api_key, api_endpoint, master_key=No
     try:
         connection.connect()
     except Exception, e:
-        print(traceback.format_exc())
+        print traceback.format_exc()
         raise ParseExportException(e)
 
     header_dict = {'X-Parse-Application-Id': app_id,
@@ -70,7 +71,7 @@ def get_parse_data(connection, app_id, rest_api_key, api_endpoint, master_key=No
         response = json.loads(connection.getresponse().read())
     except Exception, e:
         response = None
-        print(traceback.format_exc())
+        print traceback.format_exc()
         raise e
 
     return response
@@ -92,7 +93,7 @@ def cleanup(temp_directory=TEMP_DIRECTORY):
     except OSError:
         pass
     except Exception, e:
-        print(traceback.format_exc())
+        print traceback.format_exc()
         raise e
 
 
@@ -149,7 +150,7 @@ def main(temp_directory=TEMP_DIRECTORY, archive_file_path=args.archive_file_path
                 break
 
         with open(os.path.join(temp_directory, '%s.json' % classname), 'w') as json_file:
-            json_file.write(json.dumps(results, indent=4, separators=(',', ': ')))
+            json.dump(results, json_file, indent=4, separators=(',', ': '))
 
         parse_roundtrip_seconds = time.time() - get_parse_data_startime
 
@@ -177,5 +178,5 @@ if __name__ == '__main__':
     try:
         main()
     except Exception, e:
-        print(traceback.format_exc())
+        print traceback.format_exc()
         raise ParseExportException(e)
